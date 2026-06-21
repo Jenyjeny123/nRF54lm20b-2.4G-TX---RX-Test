@@ -1,8 +1,8 @@
 /*
- * nRF54LM20 2.4G 吞吐量测试 —— RX (裸 Radio 连续接收)
- * 基于 LRchangyu/nrf54l_radio 移植
+ * nRF54LM20 2.4G Dongle RX — 状态机 + 连续接收 + Window 处理
  *
- * V2 优化：ISR 去 scan_timer_start，丢包检测用 cycle counter
+ * 状态: 上电前2s→PAIRING, 2s后→RECONNECTING, 成功→CONNECTED
+ * CONNECTED: 持续 8K 收数据 + 收到 WINDOW_OPEN 后发 CMD
  */
 #include <stdio.h>
 #include <string.h>
@@ -15,33 +15,39 @@
 #include <hal/nrf_gpio.h>
 #include <hal/nrf_radio.h>
 #include <dk_buttons_and_leds.h>
+#include "protocol.h"
 
-LOG_MODULE_REGISTER(rx_radio, LOG_LEVEL_INF);
-
+LOG_MODULE_REGISTER(rx, LOG_LEVEL_INF);
 #define DP(...) do { printk(__VA_ARGS__); k_busy_wait(1000); } while(0)
 
-#define RADIO_PKT_LEN    8
-#define HOP_CHANNELS_NUM 8
-static const uint8_t hop_channels[HOP_CHANNELS_NUM] = {2,14,36,56,66,78,0,22};
+/* ===== Radio 配置 ===== */
+#define RADIO_PKT_MAX_LEN 40
+#define HOP_CHANNELS_NUM  8
+static const uint8_t hop_channels[HOP_CHANNELS_NUM]={2,14,36,56,66,78,0,22};
+#define SCAN_TIMER NRF_TIMER10
 
-#define SCAN_TIMER       NRF_TIMER10
-#define SCAN_TIMER_IRQ   TIMER10_IRQHandler
-#define SCAN_TIMER_IRQn  TIMER10_IRQn
-
-static volatile bool rx_synchronized, rx_channel_timeout, rx_ok;
+/* ===== 全局状态 ===== */
+static link_state_t link_state = ST_IDLE;
+static bool         has_pairing_info;
+static int64_t      state_entry_ms, last_stat_ms;
+static volatile bool rx_synchronized;
 static volatile uint32_t rx_total, rx_lost, rx_dup, rx_last_seq;
 static volatile bool     rx_seq_init;
-static volatile uint32_t rx_rssi_sum, rx_rssi_cnt;  /* RSSI 累加 */
-static uint8_t  radio_packet[RADIO_PKT_LEN];
-static uint8_t  current_channel;
-static uint32_t rx_last_count;
-static int64_t  last_stat_ms, test_start_ms;
-static bool     test_active;
+static volatile uint32_t rx_rssi_sum, rx_rssi_cnt;
+static volatile bool     ev_got_ctrl;      /* 收到控制包 */
+static volatile uint8_t  ev_ctrl_type;
+static uint32_t     peer_addr, my_addr;
+static uint8_t      radio_pkt[RADIO_PKT_MAX_LEN];
+static uint8_t      rx_pkt[RADIO_PKT_MAX_LEN];
+static uint8_t      current_channel;
+static uint32_t     rx_last_count;
+static bool         test_active;
+static volatile bool rx_ok;
 
+/* ===== 位翻转/跳频 ===== */
 static uint32_t swap_bits(uint32_t inp) {
 	uint32_t r=0; inp&=0xFF;
-	for(int i=0;i<8;i++) r|=((inp>>i)&1)<<(7-i);
-	return r;
+	for(int i=0;i<8;i++) r|=((inp>>i)&1)<<(7-i); return r;
 }
 static uint32_t bytewise_bitswap(uint32_t inp) {
 	return (swap_bits(inp>>24)<<24)|(swap_bits(inp>>16)<<16)|(swap_bits(inp>>8)<<8)|swap_bits(inp);
@@ -52,168 +58,206 @@ static void radio_hop(void) {
 	nrf_radio_frequency_set(NRF_RADIO,2400+hop_channels[current_channel]);
 	*(volatile uint32_t*)((uint8_t*)NRF_RADIO+0x07C)=1;
 }
-
-/* ---- 扫描定时器（仅未同步时使用）---- */
-ISR_DIRECT_DECLARE(SCAN_TIMER_IRQ) {
-	SCAN_TIMER->EVENTS_COMPARE[0]=0;
-	if(!rx_synchronized) rx_channel_timeout=true;
-	return 0;
+static void radio_set_addr(uint32_t b0, uint32_t b1, uint8_t p0) {
+	NRF_RADIO->PREFIX0=((uint32_t)swap_bits(p0)<<0);
+	NRF_RADIO->BASE0=bytewise_bitswap(b0); NRF_RADIO->BASE1=bytewise_bitswap(b1);
 }
-static void scan_timer_start(uint32_t us) {
-	SCAN_TIMER->EVENTS_COMPARE[0]=0;
-	SCAN_TIMER->TASKS_CLEAR=1;
-	SCAN_TIMER->CC[0]=us;
-	SCAN_TIMER->TASKS_START=1;
+#define ADDR_PUBLIC 0x01234567u
+#define ADDR_ALT    0x89ABCDEFu
+
+/* ===== Radio 模式 ===== */
+static void radio_rx_mode(void) {
+	NRF_RADIO->SHORTS=RADIO_SHORTS_RXREADY_START_Msk|RADIO_SHORTS_PHYEND_DISABLE_Msk
+	                 |RADIO_SHORTS_DISABLED_RXEN_Msk|RADIO_SHORTS_ADDRESS_RSSISTART_Msk;
+	NRF_RADIO->PACKETPTR=(uint32_t)rx_pkt;
+	NRF_RADIO->TASKS_DISABLE=1; while(!NRF_RADIO->EVENTS_DISABLED){}
+	NRF_RADIO->EVENTS_DISABLED=0;
+	NRF_RADIO->TASKS_RXEN=1;
+}
+static void radio_tx_mode(void) {
+	NRF_RADIO->SHORTS=RADIO_SHORTS_TXREADY_START_Msk|RADIO_SHORTS_PHYEND_DISABLE_Msk;
+	NRF_RADIO->PACKETPTR=(uint32_t)radio_pkt;
+	NRF_RADIO->TASKS_DISABLE=1; while(!NRF_RADIO->EVENTS_DISABLED){}
+	NRF_RADIO->EVENTS_DISABLED=0;
+}
+static void radio_tx_send(uint8_t len) {
+	NRF_RADIO->PACKETPTR=(uint32_t)radio_pkt;
+	NRF_RADIO->TASKS_TXEN=1; while(!NRF_RADIO->EVENTS_READY){}
+	NRF_RADIO->EVENTS_READY=0; NRF_RADIO->TASKS_START=1;
+	while(!NRF_RADIO->EVENTS_END){} NRF_RADIO->EVENTS_END=0;
 }
 
-/* ---- Radio ISR（极致精简）---- */
+/* ===== ISR ===== */
 ISR_DIRECT_DECLARE(radio_isr) {
-	if(NRF_RADIO->EVENTS_READY) { NRF_RADIO->EVENTS_READY=0; rx_ok=false; }
+	if(NRF_RADIO->EVENTS_READY)  { NRF_RADIO->EVENTS_READY=0; rx_ok=false; }
 	if(NRF_RADIO->EVENTS_END) {
-		NRF_RADIO->EVENTS_END=0; rx_total++;
+		NRF_RADIO->EVENTS_END=0;
 		if(NRF_RADIO->CRCSTATUS==1) {
 			rx_ok=true;
-			/* 读 RSSI 采样（值越大信号越强，单位 dBm 取反） */
-			uint32_t rssi = NRF_RADIO->RSSISAMPLE;
-			rx_rssi_sum += rssi; rx_rssi_cnt++;
-			if(!rx_synchronized) {
-				rx_synchronized=true; test_active=true;
-				rx_seq_init=false;  /* ★ 新同步 → 重置序号基准 */
+			uint32_t rssi=NRF_RADIO->RSSISAMPLE; rx_rssi_sum+=rssi; rx_rssi_cnt++;
+			uint8_t t=rx_pkt[0];
+			if(t & TYPE_MASK_ACK) {
+				/* 控制包 → 通知 main 处理 */
+				ev_got_ctrl=true; ev_ctrl_type=t;
+			} else if(test_active) {
+				/* 数据包 → 统计 */
+				rx_total++;
+				uint32_t seq=rx_pkt[1]|((uint32_t)rx_pkt[2]<<8)|((uint32_t)rx_pkt[3]<<16)|((uint32_t)rx_pkt[4]<<24);
+				if(!rx_seq_init){ rx_seq_init=true; rx_last_seq=seq; }
+				else if(seq==rx_last_seq) rx_dup++;
+				else if(seq>rx_last_seq){ rx_lost+=seq-rx_last_seq-1; rx_last_seq=seq; }
+				else { rx_lost+=(0xFFFFFFFFu-rx_last_seq)+seq; rx_last_seq=seq; }
 			}
-			uint32_t seq=radio_packet[1]|((uint32_t)radio_packet[2]<<8)|((uint32_t)radio_packet[3]<<16)|((uint32_t)radio_packet[4]<<24);
-			if(!rx_seq_init) {
-				/* 首个序号，建立基准 */
-				rx_seq_init=true; rx_last_seq=seq;
-			} else if(seq == rx_last_seq) {
-				rx_dup++;  /* 重复包（不应出现） */
-			} else if(seq > rx_last_seq) {
-				/* 序号间隙 = 丢失的包数 */
-				uint32_t gap = seq - rx_last_seq - 1;
-				rx_lost += gap;
-				rx_last_seq = seq;
-			} else {
-				/* seq < rx_last_seq: 32-bit 回绕或乱序 */
-				rx_lost += (0xFFFFFFFFu - rx_last_seq) + seq;
-				rx_last_seq = seq;
-			}
+		}
 	}
-	}
-	if(NRF_RADIO->EVENTS_DISABLED) {
-		NRF_RADIO->EVENTS_DISABLED=0;
-		if(rx_ok) radio_hop();
-	}
-	if(NRF_RADIO->EVENTS_RXREADY) { NRF_RADIO->EVENTS_RXREADY=0; }
+	if(NRF_RADIO->EVENTS_DISABLED) { NRF_RADIO->EVENTS_DISABLED=0; if(rx_ok) radio_hop(); }
+	if(NRF_RADIO->EVENTS_RXREADY)  { NRF_RADIO->EVENTS_RXREADY=0; }
 	return 0;
 }
 
-/* ---- Radio 初始化 ---- */
+/* ===== Radio 初始化 ===== */
 static void radio_init(void) {
-	DP("R1m "); nrf_radio_mode_set(NRF_RADIO, NRF_RADIO_MODE_NRF_4MBIT_BT_0_4);
-	DP("R2f "); current_channel=0; nrf_radio_frequency_set(NRF_RADIO,2400+hop_channels[0]);
-	DP("R3p "); nrf_radio_txpower_set(NRF_RADIO, NRF_RADIO_TXPOWER_POS8DBM);
-	DP("R4a ");
-	NRF_RADIO->PREFIX0=((uint32_t)swap_bits(0xC3)<<24)|((uint32_t)swap_bits(0xC2)<<16)|((uint32_t)swap_bits(0xC1)<<8)|((uint32_t)swap_bits(0xC0)<<0);
-	NRF_RADIO->PREFIX1=((uint32_t)swap_bits(0xC7)<<24)|((uint32_t)swap_bits(0xC6)<<16)|((uint32_t)swap_bits(0xC4)<<0);
-	NRF_RADIO->BASE0=bytewise_bitswap(0x01234567UL); NRF_RADIO->BASE1=bytewise_bitswap(0x89ABCDEFUL);
+	DP("R1 "); nrf_radio_mode_set(NRF_RADIO,NRF_RADIO_MODE_NRF_4MBIT_BT_0_4);
+	current_channel=0; nrf_radio_frequency_set(NRF_RADIO,2400+hop_channels[0]);
+	nrf_radio_txpower_set(NRF_RADIO,NRF_RADIO_TXPOWER_POS8DBM);
+	radio_set_addr(ADDR_PUBLIC,ADDR_ALT,0xC0);
 	NRF_RADIO->TXADDRESS=0; NRF_RADIO->RXADDRESSES=1;
-	DP("R5p ");
-	NRF_RADIO->PCNF0=(0<<RADIO_PCNF0_S1LEN_Pos)|(0<<RADIO_PCNF0_S0LEN_Pos)|(0<<RADIO_PCNF0_LFLEN_Pos);
-	NRF_RADIO->PCNF1=(RADIO_PCNF1_WHITEEN_Disabled<<RADIO_PCNF1_WHITEEN_Pos)|(RADIO_PCNF1_ENDIAN_Big<<RADIO_PCNF1_ENDIAN_Pos)|(4<<RADIO_PCNF1_BALEN_Pos)|(RADIO_PKT_LEN<<RADIO_PCNF1_STATLEN_Pos)|(RADIO_PKT_LEN<<RADIO_PCNF1_MAXLEN_Pos);
-	DP("R6c "); NRF_RADIO->CRCCNF=(RADIO_CRCCNF_LEN_Two<<RADIO_CRCCNF_LEN_Pos); NRF_RADIO->CRCINIT=0xFFFFUL; NRF_RADIO->CRCPOLY=0x11021UL;
-	DP("R7i ");
-	NRF_RADIO->INTENSET00=RADIO_INTENSET00_READY_Msk|RADIO_INTENSET00_END_Msk|RADIO_INTENSET00_DISABLED_Msk|RADIO_INTENSET00_RXREADY_Msk;
-	DP("R8q "); IRQ_DIRECT_CONNECT(RADIO_0_IRQn,0,radio_isr,0); NVIC_ClearPendingIRQ(RADIO_0_IRQn); irq_enable(RADIO_0_IRQn);
-	DP("R9p "); NRF_RADIO->PACKETPTR=(uint32_t)radio_packet;
-	DP("Ra "); nrf_radio_fast_ramp_up_enable_set(NRF_RADIO,true);
-	DP("Rs "); NRF_RADIO->SHORTS=RADIO_SHORTS_RXREADY_START_Msk|RADIO_SHORTS_PHYEND_DISABLE_Msk|RADIO_SHORTS_DISABLED_RXEN_Msk|RADIO_SHORTS_ADDRESS_RSSISTART_Msk;
-	DP("done\n");
+	DP("R2 "); NRF_RADIO->PCNF0=(0<<RADIO_PCNF0_S1LEN_Pos)|(1<<RADIO_PCNF0_S0LEN_Pos)|(1<<RADIO_PCNF0_LFLEN_Pos);
+	NRF_RADIO->PCNF1=(RADIO_PCNF1_WHITEEN_Disabled<<RADIO_PCNF1_WHITEEN_Pos)|(RADIO_PCNF1_ENDIAN_Big<<RADIO_PCNF1_ENDIAN_Pos)|(4<<RADIO_PCNF1_BALEN_Pos)|(RADIO_PKT_MAX_LEN<<RADIO_PCNF1_STATLEN_Pos)|(RADIO_PKT_MAX_LEN<<RADIO_PCNF1_MAXLEN_Pos);
+	DP("R3 "); NRF_RADIO->CRCCNF=(RADIO_CRCCNF_LEN_Two<<RADIO_CRCCNF_LEN_Pos); NRF_RADIO->CRCINIT=0xFFFFUL; NRF_RADIO->CRCPOLY=0x11021UL;
+	DP("R4 "); NRF_RADIO->INTENSET00=RADIO_INTENSET00_READY_Msk|RADIO_INTENSET00_END_Msk|RADIO_INTENSET00_DISABLED_Msk|RADIO_INTENSET00_RXREADY_Msk;
+	IRQ_DIRECT_CONNECT(RADIO_0_IRQn,0,radio_isr,0); NVIC_ClearPendingIRQ(RADIO_0_IRQn); irq_enable(RADIO_0_IRQn);
+	nrf_radio_fast_ramp_up_enable_set(NRF_RADIO,true);
+	radio_rx_mode(); DP("done\n");
 }
 
-static void scan_timer_init(void) {
-	DP("T1 "); SCAN_TIMER->TASKS_CLEAR=1; SCAN_TIMER->MODE=0; SCAN_TIMER->BITMODE=3; SCAN_TIMER->PRESCALER=5;
-	DP("T2 "); SCAN_TIMER->CC[0]=1000; SCAN_TIMER->INTENSET=TIMER_INTENSET_COMPARE0_Msk; SCAN_TIMER->SHORTS=TIMER_SHORTS_COMPARE0_STOP_Msk;
-	DP("T3 "); IRQ_DIRECT_CONNECT(SCAN_TIMER_IRQn,0,SCAN_TIMER_IRQ,0); NVIC_ClearPendingIRQ(SCAN_TIMER_IRQn); irq_enable(SCAN_TIMER_IRQn);
-	DP("T4\n");
+/* ===== LED ===== */
+static uint32_t led_ms; static bool led_on;
+static void led_blink(uint32_t period) {
+	if(k_uptime_get()-led_ms>=period/2){ led_ms=k_uptime_get(); led_on=!led_on; dk_set_led(DK_LED1,led_on?1:0); }
+}
+static void led_update(void) {
+	switch(link_state){
+	case ST_PAIRING:      led_blink(200); break;
+	case ST_RECONNECTING: led_blink(1000); break;
+	case ST_CONNECTED: dk_set_led(DK_LED1,(k_uptime_get()-state_entry_ms<1000)?1:0); break;
+	default: dk_set_led(DK_LED1,0); break;
+	}
 }
 
+/* ===== 控制包处理（收到 REQ → 切 TX → 回 RESP → 切回 RX）===== */
+static void handle_pair_req(void) {
+	peer_addr=*(uint32_t*)&rx_pkt[1];
+	radio_tx_mode();
+	radio_pkt[0]=TYPE_PAIR_RESP; *(uint32_t*)&radio_pkt[1]=my_addr;
+	radio_tx_send(6);
+	/* 等 PAIR_CONFIRM */
+	radio_rx_mode();
+	int64_t t=k_uptime_get()*1000+1000;
+	while(k_uptime_get()*1000<t && !ev_got_ctrl){}
+	if(ev_got_ctrl && ev_ctrl_type==TYPE_PAIR_CONFIRM) {
+		has_pairing_info=true;
+		/* TODO: NVS save peer_addr, my_addr, has_pairing_info */
+		printk("PAIR OK! peer=0x%08X\n",peer_addr);
+		link_state=ST_CONNECTED; state_entry_ms=k_uptime_get(); test_active=true;
+		rx_total=rx_lost=rx_dup=0; rx_seq_init=false; rx_last_count=0; last_stat_ms=k_uptime_get();
+	}
+	ev_got_ctrl=false;
+	radio_rx_mode();
+}
+static void handle_reconn_req(void) {
+	uint32_t req_addr=*(uint32_t*)&rx_pkt[1];
+	if(req_addr==my_addr || link_state==ST_PAIRING) {
+		radio_tx_mode();
+		radio_pkt[0]=TYPE_RECONN_RESP; radio_tx_send(2);
+		radio_rx_mode();
+		printk("RECONN OK!\n");
+		link_state=ST_CONNECTED; state_entry_ms=k_uptime_get(); test_active=true;
+		rx_total=rx_lost=rx_dup=0; rx_seq_init=false; rx_last_count=0; last_stat_ms=k_uptime_get();
+	}
+}
+static void handle_window(void) {
+	/* Dongle 收到 WINDOW_OPEN → 切 TX 发 CMD → 等 ACK → 切回 RX */
+	radio_tx_mode();
+	radio_pkt[0]=TYPE_CMD_DONGLE; radio_pkt[1]=CMD_GET_BATTERY;
+	radio_tx_send(2);
+	/* 等 ACK */
+	int64_t t=k_uptime_get()*1000+500;
+	radio_rx_mode();
+	while(k_uptime_get()*1000<t && !ev_got_ctrl){}
+	if(ev_got_ctrl && ev_ctrl_type==TYPE_ACK) {
+		/* ACK 收到, 正常 */
+	}
+	ev_got_ctrl=false;
+	radio_rx_mode();
+}
+
+/* ===== HFCLK ===== */
+static int clk_start(void) {
+	const struct device *c=DEVICE_DT_GET_OR_NULL(DT_NODELABEL(clock));
+	if(!c||!device_is_ready(c)) return -ENODEV;
+	return clock_control_on(c,(clock_control_subsys_t)CLOCK_CONTROL_NRF_SUBSYS_HF);
+}
+
+/* ================================================================ */
 int main(void) {
-	printk("\n=== nRF54LM20 Radio RX ===\n");
-	DP("CLK "); const struct device *clk=DEVICE_DT_GET_OR_NULL(DT_NODELABEL(clock));
-	if(!clk||!device_is_ready(clk)){printk("CLK FAIL\n");return 0;}
-	int e=clock_control_on(clk,(clock_control_subsys_t)CLOCK_CONTROL_NRF_SUBSYS_HF);
-	if(e<0){printk("CLK err %d\n",e);return 0;}
-	DP("ok\n");
+	printk("\n=== nRF54LM20 Dongle RX ===\n");
+	DP("CLK "); if(clk_start()){printk("CLK FAIL\n");return 0;} DP("ok\n");
+	radio_init();
+	dk_leds_init();
+	my_addr=0x87654321u; peer_addr=0; has_pairing_info=false; /* TODO: NVS */
 
-	radio_init(); scan_timer_init();
-	dk_leds_init(); dk_set_led(DK_LED1,1);
-	printk("Init done. Scanning...\n");
-	scan_timer_start(1000);
-	NRF_RADIO->TASKS_RXEN=1;
+	/* 初始：配对模式（前 2s） */
+	link_state=ST_PAIRING; state_entry_ms=k_uptime_get();
+	radio_set_addr(ADDR_PUBLIC,ADDR_ALT,0xC0); radio_rx_mode();
+	printk("Init done. PAIRING mode (2s window)\n");
 
 	while(1) {
-		/* 未同步 → 扫描跳频 */
-		if(!rx_synchronized && rx_channel_timeout) {
-			rx_channel_timeout=false; rx_ok=false;
-			NRF_RADIO->EVENTS_DISABLED=0; NRF_RADIO->TASKS_DISABLE=1;
-			while(!NRF_RADIO->EVENTS_DISABLED){}
-			radio_hop(); scan_timer_start(1000); NRF_RADIO->TASKS_RXEN=1;
+		/* 2s 后切换到回连 */
+		if(link_state==ST_PAIRING && k_uptime_get()-state_entry_ms>2000) {
+			if(has_pairing_info) {
+				link_state=ST_RECONNECTING; state_entry_ms=k_uptime_get();
+				radio_set_addr(my_addr,ADDR_ALT,0xC0); radio_rx_mode();
+				printk("Switching to RECONNECTING\n");
+			} else {
+				/* 未配对过，保持在 PAIRING 但只收 RECONN_REQ(忽略), 只收 PAIR_REQ */
+				/* 实际上就是没配对过就一直配对模式 */
+				printk("No pair info, staying PAIRING\n");
+				state_entry_ms=k_uptime_get(); /* 重置计时 */
+			}
 		}
 
-		/* 丢包检测（基于 cycle counter，不用 timer 寄存器）*/
-		static uint8_t miss_cnt;
-		if(rx_synchronized && !rx_ok) {
-			miss_cnt++;
-			if(miss_cnt>10) {
-				rx_synchronized=false; miss_cnt=0;
-				if(test_active) {
-					int64_t el=k_uptime_get()-test_start_ms;
-					uint32_t total=rx_total, lost=rx_lost, dup=rx_dup;
-					uint32_t total_with_loss=total+lost;
-					uint32_t pps=el>0?(uint32_t)(total*1000ULL/(uint64_t)el):0;
-					printk("<<< Signal lost =====\n");
-					printk("  ok:%u lost:%u dup:%u dur:%lldms rate:%upps\n",
-						total, lost, dup, el, pps);
-					if(total_with_loss>0) {
-						uint32_t permille=lost*1000u/total_with_loss;
-						printk("  loss rate: %u.%u%%\n", permille/10, permille%10);
-					}
-					test_active=false; rx_total=0; rx_lost=0; rx_dup=0;
-				rx_last_count=0; rx_seq_init=false; rx_last_seq=0;
-					dk_set_led(DK_LED1,1);
-				}
-			}
-		} else if(rx_ok) { miss_cnt=0; }
+		/* 处理收到的控制包 */
+		if(ev_got_ctrl) {
+			uint8_t t=ev_ctrl_type; ev_got_ctrl=false;
+			if(link_state==ST_PAIRING && t==TYPE_PAIR_REQ) handle_pair_req();
+			else if(t==TYPE_RECONN_REQ) handle_reconn_req();
+			else if(link_state==ST_CONNECTED && t==TYPE_WINDOW_OPEN) handle_window();
+		}
 
-		/* 刚同步 */
-		if(rx_synchronized && !test_active) {
-			test_active=true; rx_total=0; rx_lost=0; rx_dup=0; rx_last_count=0;
-			rx_seq_init=false; rx_rssi_sum=0; rx_rssi_cnt=0;
-			test_start_ms=last_stat_ms=k_uptime_get();
-			printk(">>> Synced!\n"); dk_set_led(DK_LED3,1);
+		/* 失同步检测 */
+		static uint8_t miss;
+		if(test_active && link_state==ST_CONNECTED) {
+			if(!rx_ok) { miss++; if(miss>10) {
+				printk("<<< Signal lost\n"); test_active=false; miss=0;
+				link_state=ST_RECONNECTING; state_entry_ms=k_uptime_get();
+				radio_set_addr(has_pairing_info?my_addr:ADDR_PUBLIC,ADDR_ALT,0xC0); radio_rx_mode();
+			}}
+			else miss=0;
 		}
 
 		/* 每秒统计 */
-		if(test_active) {
-			int64_t now=k_uptime_get();
-			if((now-last_stat_ms)>=1000) {
-				uint32_t total=rx_total, lost=rx_lost, dup=rx_dup;
-				uint32_t pps=total-rx_last_count;
-				uint32_t total_with_loss = total + lost;
-				/* 算平均 RSSI */
-				int32_t avg_rssi=0;
-				uint32_t cnt=rx_rssi_cnt;
-				if(cnt>0) avg_rssi=-(int32_t)(rx_rssi_sum/cnt);
-				rx_rssi_sum=0; rx_rssi_cnt=0;
-				printk("[RX] +%u pkt/s | ok:%u lost:%u dup:%u rssi:%ddBm",
-					pps, total, lost, dup, avg_rssi);
-				if(total_with_loss>0) {
-					uint32_t permille = lost*1000u/total_with_loss;
-					printk(" (loss %u.%u%%)", permille/10, permille%10);
-				}
-				printk("\n");
-				rx_last_count=total; last_stat_ms=now;
-			}
+		if(test_active && k_uptime_get()-last_stat_ms>=1000) {
+			uint32_t total=rx_total, lost=rx_lost, dup=rx_dup, cnt=rx_rssi_cnt;
+			int32_t rssi=cnt>0?-(int32_t)(rx_rssi_sum/cnt):0;
+			uint32_t pps=total-rx_last_count;
+			printk("[RX] +%u pkt/s | ok:%u lost:%u dup:%u rssi:%ddBm",pps,total,lost,dup,rssi);
+			if(total+lost>0){ uint32_t pm=lost*1000u/(total+lost); printk(" (loss %u.%u%%)",pm/10,pm%10); }
+			printk("\n");
+			rx_last_count=total; last_stat_ms=k_uptime_get(); rx_rssi_sum=0; rx_rssi_cnt=0;
 		}
+
+		led_update();
 		k_sleep(K_MSEC(50));
 	}
 }
