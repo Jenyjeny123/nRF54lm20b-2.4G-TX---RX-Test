@@ -19,9 +19,44 @@
 #include <hal/nrf_gpio.h>
 #include <hal/nrf_radio.h>
 #include <dk_buttons_and_leds.h>
+#include <zephyr/fs/nvs.h>
+#include <zephyr/storage/flash_map.h>
 #include "protocol.h"
 
 LOG_MODULE_REGISTER(tx, LOG_LEVEL_INF);
+
+/* ===== NVS 配对信息存储 ===== */
+#define NVS_ID_PAIRED  1
+#define NVS_ID_PEER    2
+#define NVS_ID_MY      3
+
+static struct nvs_fs nvs;
+static uint8_t nvs_buf[64];  /* NVS 工作缓冲, 最小 3 * 页大小对齐 */
+
+static int nvs_init(void) {
+	nvs.flash_device = FIXED_PARTITION_DEVICE(storage_partition);
+	if(!device_is_ready(nvs.flash_device)) return -ENODEV;
+	nvs.offset = FIXED_PARTITION_OFFSET(storage_partition);
+	nvs.sector_size = 4096; /* nRF flash page size */
+	nvs.sector_count = FIXED_PARTITION_SIZE(storage_partition) / 4096;
+	return nvs_mount(&nvs);
+}
+static void nvs_save_pairing(uint32_t peer, uint32_t my) {
+	uint8_t flag=1;
+	nvs_write(&nvs, NVS_ID_PAIRED, &flag, 1);
+	nvs_write(&nvs, NVS_ID_PEER,   &peer, 4);
+	nvs_write(&nvs, NVS_ID_MY,     &my,   4);
+	printk("NVS: saved peer=0x%08X my=0x%08X\n", peer, my);
+}
+static bool nvs_load_pairing(uint32_t *peer, uint32_t *my) {
+	uint8_t flag=0; int r;
+	r=nvs_read(&nvs, NVS_ID_PAIRED, &flag, 1);
+	if(r<=0 || flag!=1) return false;
+	nvs_read(&nvs, NVS_ID_PEER, peer, 4);
+	nvs_read(&nvs, NVS_ID_MY,   my,   4);
+	printk("NVS: loaded peer=0x%08X my=0x%08X\n", *peer, *my);
+	return true;
+}
 #define DP(...) do { printk(__VA_ARGS__); k_busy_wait(1000); } while(0)
 
 /* ===== Radio 配置 ===== */
@@ -185,7 +220,7 @@ static void pairing_tick(void) {
 		radio_pkt[0]=TYPE_PAIR_CONFIRM;
 		if(send_and_wait_ack(2, ACK_TIMEOUT_US)) {
 			has_pairing_info=true;
-			/* TODO: NVS save peer_addr, my_addr, has_pairing_info */
+			nvs_save_pairing(peer_addr, my_addr);
 			printk("PAIR OK! peer=0x%08X\n",peer_addr);
 			link_state=ST_CONNECTED; state_entry_ms=k_uptime_get();
 		}
@@ -232,7 +267,10 @@ int main(void) {
 	radio_init(); dppi_init();
 	dk_leds_init(); dk_buttons_init(btn_handler);
 
-	my_addr=0x12345678u; peer_addr=0; has_pairing_info=false; /* TODO: NVS */
+	/* NVS 初始化 + 读配对信息 */
+	if(nvs_init()) { printk("NVS init FAIL\n"); has_pairing_info=false; my_addr=0x12345678u; }
+	else has_pairing_info=nvs_load_pairing(&peer_addr, &my_addr);
+	if(!has_pairing_info) { my_addr=0x12345678u; peer_addr=0; }
 
 	if(has_pairing_info) { link_state=ST_RECONNECTING; radio_set_addr(peer_addr,ADDR_ALT,0xC0); }
 	else                 { link_state=ST_PAIRING;      radio_set_addr(ADDR_PUBLIC,ADDR_ALT,0xC0); }

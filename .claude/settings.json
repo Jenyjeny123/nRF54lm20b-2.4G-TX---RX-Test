@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//f/Coding/Nordic/nRF54lm20/nRF54lm20_boot/**)",
+      "Read(//f/Coding/ncs/v3.3.0/nrf/samples/esb/**)",
+      "Read(//f/Coding/ncs/v3.3.0/nrf/samples/**)",
+      "Bash(cp -r \"F:/Coding/ncs/v3.3.0/nrf/samples/esb/esb_ptx\" \"f:/Coding/Nordic/nRF54lm20/nRF54lm20_24G/tx\" && echo \"TX copied OK\")",
+      "Bash(west --version)",
+      "Bash(ls \"F:/Coding/ncs/v3.3.0/zephyr/zephyr-env.cmd\" 2>/dev/null && echo \"Found zephyr-env.cmd\" || echo \"Not found\"; ls \"F:/Coding/ncs/v3.3.0/toolchain/\" 2>/dev/null | head -5 || echo \"No toolchain dir\")",
+      "Read(//f/Coding/ncs/v3.3.0/**)",
+      "Bash(export ZEPHYR_BASE=\"F:/Coding/ncs/v3.3.0/zephyr\")",
+      "Bash(west build *)",
+      "Read(//c/Users/stark/AppData/Local/Programs/Python/**)",
+      "Read(//c/Program Files/**)",
+      "Read(//c//**)",
+      "Bash(/c/Users/stark/AppData/Local/Programs/Python/Python310/python.exe -m pip install -r \"F:/Coding/ncs/v3.3.0/zephyr/scripts/requirements.txt\")",
+      "Read(//f//**)",
+      "Bash(where arm-none-eabi-gcc *)",
+      "WebSearch",
+      "WebFetch(domain:www.ezurio.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh repo *)",
+      "Read(//tmp/**)",
+      "Bash(git init *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(sed -i 's/int err; struct flash_pages_info info;//' main.c)",
+      "Bash(sed -i 's/err = flash_get_page_info_by_offs\\(nvs.flash_device, nvs.offset, &info\\);//' main.c)",
+      "Bash(sed -i 's/if\\(err<0\\) return err;//' main.c)",
+      "Bash(sed -i 's/nvs.sector_size = info.size;/nvs.sector_size = 4096;/' main.c)",
+      "Bash(sed -i 's/nvs.sector_count = 4;/nvs.sector_count = FIXED_PARTITION_SIZE\\(storage_partition\\) \\\\/ 4096;/' main.c)"
+    ]
+  }
+}
