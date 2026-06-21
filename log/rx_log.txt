@@ -1,0 +1,57 @@
+[02:28:02.903] *** Booting nRF Connect SDK v3.3.0-ba167d9f3db4 ***
+[02:28:02.923] *** Using Zephyr OS v4.3.99-fd9204a02d52 ***
+[02:28:02.933] 
+[02:28:02.933] === nRF54LM20 Radio RX ===
+[02:28:02.933] CLK ok
+[02:28:02.933] R1m R2f R3p R4a R5p R6c R7i R8q R9p Ra Rs done
+[02:28:02.943] T1 T2 T3 T4
+[02:28:02.943] Init done. Scanning...
+[02:28:09.583] [RX] +332 pkt/s | ok:332 lost:18 dup:0 rssi:-34dBm (loss 5.1%)
+[02:28:09.593] [RX] +7796 pkt/s | ok:8128 lost:242 dup:0 rssi:-35dBm (loss 2.8%)
+[02:28:11.592] [RX] +7752 pkt/s | ok:15880 lost:506 dup:0 rssi:-35dBm (loss 3.0%)
+[02:28:11.592] [RX] +7614 pkt/s | ok:23494 lost:914 dup:0 rssi:-36dBm (loss 3.7%)
+[02:28:13.593] [RX] +7651 pkt/s | ok:31145 lost:1282 dup:0 rssi:-36dBm (loss 3.9%)
+[02:28:13.603] [RX] +7707 pkt/s | ok:38852 lost:1594 dup:0 rssi:-36dBm (loss 3.9%)
+[02:28:15.603] [RX] +7825 pkt/s | ok:46677 lost:1786 dup:0 rssi:-36dBm (loss 3.6%)
+[02:28:15.603] [RX] +7778 pkt/s | ok:54455 lost:2026 dup:0 rssi:-36dBm (loss 3.5%)
+[02:28:17.603] [RX] +7767 pkt/s | ok:62222 lost:2274 dup:0 rssi:-36dBm (loss 3.5%)
+[02:28:17.603] [RX] +7705 pkt/s | ok:69927 lost:2586 dup:0 rssi:-37dBm (loss 3.5%)
+[02:28:19.603] [RX] +7658 pkt/s | ok:77585 lost:2946 dup:0 rssi:-37dBm (loss 3.6%)
+[02:28:19.613] [RX] +7649 pkt/s | ok:85234 lost:3314 dup:0 rssi:-34dBm (loss 3.7%)
+[02:28:21.613] [RX] +7950 pkt/s | ok:93184 lost:3378 dup:0 rssi:-27dBm (loss 3.4%)
+[02:28:21.613] [RX] +8015 pkt/s | ok:101199 lost:3378 dup:0 rssi:-21dBm (loss 3.2%)
+[02:28:23.612] [RX] +8014 pkt/s | ok:109213 lost:3378 dup:0 rssi:-21dBm (loss 3.0%)
+[02:28:23.622] [RX] +8014 pkt/s | ok:117227 lost:3378 dup:0 rssi:-21dBm (loss 2.8%)
+[02:28:25.612] [RX] +8014 pkt/s | ok:125241 lost:3378 dup:0 rssi:-21dBm (loss 2.6%)
+[02:28:25.633] [RX] +8014 pkt/s | ok:133255 lost:3378 dup:0 rssi:-21dBm (loss 2.4%)
+[02:28:27.634] [RX] +8015 pkt/s | ok:141270 lost:3378 dup:0 rssi:-21dBm (loss 2.3%)
+[02:28:27.643] [RX] +8014 pkt/s | ok:149284 lost:3378 dup:0 rssi:-21dBm (loss 2.2%)
+[02:28:29.633] [RX] +8014 pkt/s | ok:157298 lost:3378 dup:0 rssi:-21dBm (loss 2.1%)
+[02:28:29.642] [RX] +8014 pkt/s | ok:165312 lost:3378 dup:0 rssi:-21dBm (loss 2.0%)
+[02:28:31.637] [RX] +8014 pkt/s | ok:173326 lost:3378 dup:0 rssi:-21dBm (loss 1.9%)
+[02:28:31.643] [RX] +8014 pkt/s | ok:181340 lost:3378 dup:0 rssi:-21dBm (loss 1.8%)
+[02:28:33.636] [RX] +8014 pkt/s | ok:189354 lost:3378 dup:0 rssi:-21dBm (loss 1.7%)
+[02:28:33.643] [RX] +8014 pkt/s | ok:197368 lost:3378 dup:0 rssi:-21dBm (loss 1.6%)
+[02:28:35.640] [RX] +8015 pkt/s | ok:205383 lost:3378 dup:0 rssi:-21dBm (loss 1.6%)
+[02:28:35.643] [RX] +8014 pkt/s | ok:213397 lost:3378 dup:0 rssi:-21dBm (loss 1.5%)
+[02:28:37.643] [RX] +8014 pkt/s | ok:221411 lost:3378 dup:0 rssi:-21dBm (loss 1.5%)
+[02:28:37.643] [RX] +8014 pkt/s | ok:229425 lost:3378 dup:0 rssi:-16dBm (loss 1.4%)
+[02:28:39.642] [RX] +8014 pkt/s | ok:237439 lost:3378 dup:0 rssi:-16dBm (loss 1.4%)
+[02:28:39.642] [RX] +8014 pkt/s | ok:245453 lost:3378 dup:0 rssi:-16dBm (loss 1.3%)
+[02:28:41.642] [RX] +8014 pkt/s | ok:253467 lost:3378 dup:0 rssi:-16dBm (loss 1.3%)
+[02:28:41.653] [RX] +8014 pkt/s | ok:261481 lost:3378 dup:0 rssi:-16dBm (loss 1.2%)
+[02:28:43.653] [RX] +8015 pkt/s | ok:269496 lost:3378 dup:0 rssi:-16dBm (loss 1.2%)
+[02:28:43.653] [RX] +8014 pkt/s | ok:277510 lost:3378 dup:0 rssi:-16dBm (loss 1.2%)
+[02:28:45.653] [RX] +8014 pkt/s | ok:285524 lost:3378 dup:0 rssi:-16dBm (loss 1.1%)
+[02:28:45.653] [RX] +8014 pkt/s | ok:293538 lost:3378 dup:0 rssi:-16dBm (loss 1.1%)
+[02:28:47.653] [RX] +8014 pkt/s | ok:301552 lost:3378 dup:0 rssi:-16dBm (loss 1.1%)
+[02:28:47.662] [RX] +8014 pkt/s | ok:309566 lost:3378 dup:0 rssi:-16dBm (loss 1.0%)
+[02:28:49.653] [RX] +8014 pkt/s | ok:317580 lost:3378 dup:0 rssi:-16dBm (loss 1.0%)
+[02:28:49.663] [RX] +8014 pkt/s | ok:325594 lost:3378 dup:0 rssi:-16dBm (loss 1.0%)
+[02:28:51.663] [RX] +8014 pkt/s | ok:333608 lost:3378 dup:0 rssi:-16dBm (loss 1.0%)
+[02:28:51.663] [RX] +8014 pkt/s | ok:341622 lost:3378 dup:0 rssi:-16dBm (loss 0.9%)
+[02:28:53.663] [RX] +8015 pkt/s | ok:349637 lost:3378 dup:0 rssi:-16dBm (loss 0.9%)
+[02:28:53.673] [RX] +8014 pkt/s | ok:357651 lost:3378 dup:0 rssi:-16dBm (loss 0.9%)
+[02:28:55.063] <<< Signal lost =====
+[02:28:55.073]   ok:358452 lost:3378 dup:0 dur:51163ms rate:7006pps
+[02:28:55.073]   loss rate: 0.9%
