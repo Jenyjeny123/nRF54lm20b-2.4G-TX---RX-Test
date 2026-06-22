@@ -73,7 +73,8 @@ static volatile bool rx_synchronized;
 static volatile uint32_t rx_total, rx_lost, rx_dup, rx_last_seq;
 static volatile bool     rx_seq_init;
 static volatile uint32_t rx_rssi_sum, rx_rssi_cnt;
-static volatile bool     ev_got_ctrl;      /* 收到控制包 */
+static volatile bool     ctrl_mode;        /* 控制事务中，ISR 不碰 END */
+static volatile bool     ev_got_ctrl;
 static volatile uint8_t  ev_ctrl_type;
 static uint32_t     peer_addr, my_addr;
 static uint8_t      radio_pkt[RADIO_PKT_MAX_LEN];
@@ -130,6 +131,7 @@ static void radio_tx_send(uint8_t len) {
 ISR_DIRECT_DECLARE(radio_isr) {
 	if(NRF_RADIO->EVENTS_READY)  { NRF_RADIO->EVENTS_READY=0; rx_ok=false; }
 	if(NRF_RADIO->EVENTS_END) {
+		if(ctrl_mode) return 0;  /* 控制事务中 → 不处理，留给主循环轮询 */
 		NRF_RADIO->EVENTS_END=0;
 		if(NRF_RADIO->CRCSTATUS==1) {
 			rx_ok=true;
@@ -186,11 +188,11 @@ static void led_update(void) {
 
 /* ===== 控制包处理（收到 REQ → 切 TX → 回 RESP → 切回 RX）===== */
 static void handle_pair_req(void) {
+	ctrl_mode=true;
 	peer_addr=*(uint32_t*)&rx_pkt[1];
 	radio_tx_mode();
 	radio_pkt[0]=TYPE_PAIR_RESP; *(uint32_t*)&radio_pkt[1]=my_addr;
 	radio_tx_send(6);
-	/* 等 PAIR_CONFIRM */
 	radio_rx_mode();
 	int64_t t=k_uptime_get()*1000+1000;
 	while(k_uptime_get()*1000<t && !ev_got_ctrl){}
@@ -202,32 +204,33 @@ static void handle_pair_req(void) {
 		rx_total=rx_lost=rx_dup=0; rx_seq_init=false; rx_last_count=0; last_stat_ms=k_uptime_get();
 	}
 	ev_got_ctrl=false;
+	ctrl_mode=false;
 	radio_rx_mode();
 }
 static void handle_reconn_req(void) {
 	uint32_t req_addr=*(uint32_t*)&rx_pkt[1];
 	if(req_addr==my_addr || link_state==ST_PAIRING) {
+		ctrl_mode=true;
 		radio_tx_mode();
 		radio_pkt[0]=TYPE_RECONN_RESP; radio_tx_send(2);
 		radio_rx_mode();
+		ctrl_mode=false;
 		printk("RECONN OK!\n");
 		link_state=ST_CONNECTED; state_entry_ms=k_uptime_get(); test_active=true;
 		rx_total=rx_lost=rx_dup=0; rx_seq_init=false; rx_last_count=0; last_stat_ms=k_uptime_get();
 	}
 }
 static void handle_window(void) {
-	/* Dongle 收到 WINDOW_OPEN → 切 TX 发 CMD → 等 ACK → 切回 RX */
+	ctrl_mode=true;
 	radio_tx_mode();
 	radio_pkt[0]=TYPE_CMD_DONGLE; radio_pkt[1]=CMD_GET_BATTERY;
 	radio_tx_send(2);
-	/* 等 ACK */
 	int64_t t=k_uptime_get()*1000+500;
 	radio_rx_mode();
 	while(k_uptime_get()*1000<t && !ev_got_ctrl){}
-	if(ev_got_ctrl && ev_ctrl_type==TYPE_ACK) {
-		/* ACK 收到, 正常 */
-	}
+	if(ev_got_ctrl && ev_ctrl_type==TYPE_ACK) {}
 	ev_got_ctrl=false;
+	ctrl_mode=false;
 	radio_rx_mode();
 }
 

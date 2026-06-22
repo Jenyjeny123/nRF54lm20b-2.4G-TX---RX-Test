@@ -147,8 +147,10 @@ static bool send_and_wait_ack(uint8_t len, uint32_t timeout_us) {
 ISR_DIRECT_DECLARE(radio_isr) {
 	if(NRF_RADIO->EVENTS_READY) { NRF_RADIO->EVENTS_READY=0; }
 	if(NRF_RADIO->EVENTS_END) {
-		NRF_RADIO->EVENTS_END=0;
-		if(test_running && link_state==ST_CONNECTED) {
+		/* ★ 仅在 DPPI 数据模式下由 ISR 处理 END；
+		 * 配对/回连/Window 模式由主循环轮询，ISR 不碰 */
+		if(dppi_running && test_running && link_state==ST_CONNECTED) {
+			NRF_RADIO->EVENTS_END=0;
 			tx_total++; radio_hop();
 			radio_pkt[0]=TYPE_MOUSE;
 			radio_pkt[1]=(uint8_t)(tx_total&0xFF);

@@ -1,48 +1,22 @@
-[01:07:16.195] *** Booting nRF Connect SDK v3.3.0-ba167d9f3db4 ***
-[01:07:16.227] *** Using Zephyr OS v4.3.99-fd9204a02d52 ***
-[01:07:16.227] 
-[01:07:16.227] === nRF54LM20 Radio TX 8K DPPI ===
-[01:07:16.227] CLK start CLK ok
-[01:07:16.237] R1 mode R2 freq R3 txpwr R4 addr R5 pcnf R6 crc R7 int R8 irq R9 ptr R10 ramp R11 shorts R12 done
-[01:07:16.237] D1 timer D2 pub D3 ch10 D4 pp11 D5 pp21 D6 ch20 D7 gpio D8 done
-[01:07:16.246] Init complete. Press Button 0.
-[01:07:50.281] >>> TEST START
-[01:07:51.291] [TX] +8065 pkt/s | total:8065
-[01:07:52.299] [TX] +8067 pkt/s | total:16132
-[01:07:53.307] [TX] +8066 pkt/s | total:24198
-[01:07:54.315] [TX] +8068 pkt/s | total:32266
-[01:07:55.324] [TX] +8066 pkt/s | total:40332
-[01:07:56.332] [TX] +8066 pkt/s | total:48398
-[01:07:57.341] [TX] +8067 pkt/s | total:56465
-[01:07:58.347] [TX] +8066 pkt/s | total:64531
-[01:07:59.357] [TX] +8067 pkt/s | total:72598
-[01:08:00.365] [TX] +8067 pkt/s | total:80665
-[01:08:01.374] [TX] +8065 pkt/s | total:88731
-[01:08:02.382] [TX] +8066 pkt/s | total:96797
-[01:08:03.390] [TX] +8067 pkt/s | total:104864
-[01:08:04.396] [TX] +8066 pkt/s | total:112930
-[01:08:05.407] [TX] +8067 pkt/s | total:120997
-[01:08:06.415] [TX] +8066 pkt/s | total:129063
-[01:08:07.423] [TX] +8067 pkt/s | total:137130
-[01:08:08.432] [TX] +8065 pkt/s | total:145195
-[01:08:09.440] [TX] +8066 pkt/s | total:153262
-[01:08:10.447] [TX] +8067 pkt/s | total:161329
-[01:08:11.456] [TX] +8066 pkt/s | total:169395
-[01:08:12.466] [TX] +8067 pkt/s | total:177463
-[01:08:13.474] [TX] +8066 pkt/s | total:185529
-[01:08:14.482] [TX] +8067 pkt/s | total:193597
-[01:08:15.491] [TX] +8065 pkt/s | total:201662
-[01:08:16.498] [TX] +8067 pkt/s | total:209729
-[01:08:17.507] [TX] +8067 pkt/s | total:217797
-[01:08:17.508] 
-[01:08:18.515] [TX] +8066 pkt/s | total:225863
-[01:08:19.524] [TX] +8067 pkt/s | total:233930
-[01:08:20.532] [TX] +8067 pkt/s | total:241997
-[01:08:21.541] [TX] +8066 pkt/s | total:250063
-[01:08:22.547] [TX] +8066 pkt/s | total:258129
-[01:08:23.557] [TX] +8065 pkt/s | total:266195
-[01:08:24.565] [TX] +8066 pkt/s | total:274262
-[01:08:25.577] [TX] +8067 pkt/s | total:282329
-[01:08:25.577] <<< TEST STOP
-[01:08:25.577] ===== TX STATS =====
-[01:08:25.580]   sent:286120  dur:35765ms  rate:8000pps
+[16:07:22.556] *** Booting nRF Connect SDK v3.3.0-ba167d9f3db4 ***
+[16:07:22.571] *** Using Zephyr OS v4.3.99-fd9204a02d52 ***
+[16:07:22.582] 
+[16:07:22.582] === nRF54LM20 Mouse TX ===
+[16:07:22.582] CLK ok
+[16:07:22.582] R1m R2 R3 R4 R5 done
+[16:07:22.582] D1 done
+[16:07:22.582] [00:01:33.089,739] [0m<inf> fs_nvs: 9 Sectors of 4096 bytes[0m
+[16:07:22.591] [00:01:33.089,745] [0m<inf> fs_nvs: alloc wra: 0, fd0[0m
+[16:07:22.601] [00:01:33.089,749] [0m<inf> fs_nvs: data wra: 0, 0[0m
+[16:07:22.601] Init done. state=1 has_pair=0
+[16:07:53.579] *** Booting nRF Connect SDK v3.3.0-ba167d9f3db4 ***
+[16:07:53.601] *** Using Zephyr OS v4.3.99-fd9204a02d52 ***
+[16:07:53.601] 
+[16:07:53.601] === nRF54LM20 Mouse TX ===
+[16:07:53.611] CLK ok
+[16:07:53.611] R1m R2 R3 R4 R5 done
+[16:07:53.611] D1 done
+[16:07:53.611] [00:02:04.113,787] [0m<inf> fs_nvs: 9 Sectors of 4096 bytes[0m
+[16:07:53.611] [00:02:04.113,793] [0m<inf> fs_nvs: alloc wra: 0, fd0[0m
+[16:07:53.622] [00:02:04.113,798] [0m<inf> fs_nvs: data wra: 0, 0[0m
+[16:07:53.622] Init done. state=1 has_pair=0
